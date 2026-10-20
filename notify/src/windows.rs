@@ -277,8 +277,10 @@ impl ReadDirectoryChangesServer {
         is_recursive: bool,
         separator_style: SeparatorStyle,
     ) -> Result<PathBuf> {
-        // path must exist and be either a file or directory
-        if !path.is_dir() && !path.is_file() {
+        let metadata = path
+            .metadata()
+            .map_err(|error| Error::io_watch(error).add_path(path.clone()))?;
+        if !metadata.is_dir() && !metadata.is_file() {
             return Err(
                 Error::generic("Input watch path is neither a file nor a directory.")
                     .add_path(path),
@@ -286,7 +288,7 @@ impl ReadDirectoryChangesServer {
         }
 
         let (watching_file, dir_target) = {
-            if path.is_dir() {
+            if metadata.is_dir() {
                 (false, path.clone())
             } else {
                 // emulate file watching by watching the parent directory
@@ -677,8 +679,7 @@ impl ReadDirectoryChangesWatcher {
         let ack_pb = self
             .cmd_rx
             .recv()
-            .map_err(|_| Error::generic("Error receiving from command channel"))?
-            .map_err(|e| Error::generic(&format!("Error in watcher: {:?}", e)))?;
+            .map_err(|_| Error::generic("Error receiving from command channel"))??;
 
         if pb.as_path() != ack_pb.as_path() {
             Err(Error::generic(&format!(
@@ -699,12 +700,6 @@ impl ReadDirectoryChangesWatcher {
             let p = env::current_dir().map_err(Error::io)?;
             p.join(path)
         };
-        // path must exist and be either a file or directory
-        if !pb.is_dir() && !pb.is_file() {
-            return Err(Error::generic(
-                "Input watch path is neither a file nor a directory.",
-            ));
-        }
         self.send_action_require_ack(
             Action::Watch(pb.clone(), recursive_mode, separator_style),
             &pb,
